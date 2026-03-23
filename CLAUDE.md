@@ -6,11 +6,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Watson PowertrainOS is a fleet workforce and compliance operating system for Watson Truck & Supply, Inc. (Hobbs, NM) and its subsidiary Watson Hopper Inc. It manages the full employee lifecycle — hiring, onboarding, DOT compliance tracking, safety incident management, benefits enrollment, and workforce analytics.
+Watson PowertrainOS is a fleet workforce and compliance operating system for **Watson Truck & Supply, Inc.**, **Watson Hopper Inc.**, and **Unit Shop, LLC** — all operating from 1501 N Grimes St, Hobbs, NM 88240. It manages the full employee lifecycle — hiring, onboarding, DOT compliance tracking, safety incident management, benefits enrollment, and workforce analytics.
 
-**Business model**: Internal platform for Watson Truck & Supply and Watson Hopper Inc. Manages drivers, mechanics, office staff, and field employees across multiple New Mexico locations. Core differentiator is the DOT Compliance Engine — automated CDL expiration tracking, medical card monitoring, drug test scheduling, and audit-readiness tooling.
+**Business model**: Internal platform for all three Watson entities. Manages drivers, mechanics, office staff, and field employees across multiple New Mexico locations. Core differentiator is the DOT Compliance Engine — automated CDL expiration tracking, medical card monitoring, drug test scheduling, and audit-readiness tooling.
 
-**Current status**: This is a single unified Next.js 14 project at the repository root. Phase 1 (schema, auth, workforce hub, DOT compliance dashboard) is complete. Benefits enrollment, career hub, employee profiles, and the digital employment application are in active development (Phase 2).
+**Current status**: Phase 1 complete (schema, auth, workforce hub, DOT compliance dashboard, safety & incident tracking). Phase 2 in progress (benefits enrollment wizard, hiring ATS, digital employment application).
 
 **Workspace layout**: The root IS the project. `src/` contains all application code. `functions/` contains Firebase Cloud Functions for secure API key retrieval. `_archive/` holds the old `client/` and `powertrainos/` subdirectories for reference — do not develop there.
 
@@ -113,23 +113,35 @@ All static files are served from `public/` at the root. Reference them as `/imag
 
 ## Watson Entity Structure — Critical Rule
 
-Watson operates two distinct entities. Code, data, and UI must never mix their employee rosters, documents, or operational data.
+Watson operates **three** distinct entities. Code, data, and UI must never mix their employee rosters, documents, or operational data.
 
-| Entity | Type | Description |
-|---|---|---|
-| Watson Truck & Supply, Inc. | Primary | Truck sales, parts, service, field mechanics — Hobbs, NM |
-| Watson Hopper Inc. | Subsidiary | Heavy-haul and oilfield hopper equipment operations |
+| Entity | Type | Description | Key Contact |
+|---|---|---|---|
+| Watson Truck & Supply, Inc. | Primary | Truck sales, parts, service, field mechanics — Hobbs, NM | Jerry Elliott — 575-397-2411, jerryelliot@watsontruck.com |
+| Watson Hopper Inc. | Subsidiary | Heavy-haul and oilfield hopper equipment operations | Mike Slaugh — ext.425, mslaugh@watsonhopper.com |
+| Unit Shop, LLC | Subsidiary | Unit shop operations — same 1501 N Grimes address | Dale May — ext.335, dmay@watsontruck.com |
 
 ### Rules for all code and data decisions:
 - Employees belong to exactly **one** `company_id` — never shared across entities
 - Compliance alerts, incidents, and documents are scoped to their company
 - The `companies` table is the root of all tenant data — always filter by `company_id`
-- Benefits plans (IMS group health, Guardian life/dental/vision) are Watson Truck & Supply specific — do not assume they apply to Watson Hopper without confirmation
+- Benefits plans (IMS group health, Guardian life/dental/vision) are Watson Truck & Supply specific — do not assume they apply to Watson Hopper or Unit Shop without confirmation
 - Reports and dashboards must always surface which entity the data belongs to
 - RLS policies enforce `company_id` isolation at the database level
 
-### IMS Group Numbers (for benefits enrollment):
-- Watson Truck & Supply, Inc.: **SWT0906**
+### Department Contact Directory (1501 N Grimes St, Hobbs, NM — main: 575-397-2411)
+
+| Department | Contact | Extension | Email |
+|---|---|---|---|
+| Oil Field Supply & Int'l Parts | Bruce Dew | ext.227 | bdew@watsontruck.com |
+| Watson Hopper | Mike Slaugh | ext.425 | mslaugh@watsonhopper.com |
+| Unit Shop | Dale May | ext.335 | dmay@watsontruck.com |
+| Truck Sales | Brad Hawkins | ext.401 | bhawkins@watsontruck.com |
+| Truck Shop | Dan Wharff | ext.272 | dwharff@watsontruck.com |
+
+### Plan / Group Numbers (for enrollment forms — hardcode these, do not make configurable):
+- IMS Group Health — Watson Truck & Supply: **SWT0906**
+- Guardian Life/Dental/Vision Group Plan: **00483632**
 
 ---
 
@@ -287,6 +299,68 @@ Exams: $10 co-pay in-network. Lenses: $25 co-pay. Frames: $130 retail + 20% off 
 - Two enrollment classes: employees enrolling in medical vs. not enrolling in medical
 - Enrollment/change form: 4 pages (not enrolling in medical) or 6 pages (enrolling in medical)
 - BoldSign templates required for both variants
+
+### Life Insurance Tiers (AD&D policy amounts by class):
+| Class | Basic Life AD&D |
+|---|---|
+| Owner | Highest tier |
+| Manager | Mid tier |
+| Employee | Base tier |
+
+The `class` column on the `employees` table determines which tier applies.
+
+---
+
+## Benefits Enrollment Business Rules — Critical
+
+These rules come from the legacy system and must be enforced in the enrollment wizard:
+
+### Marital Status Routing
+Enrollment flow branches based on `employees.marital_status`:
+- `married` → Spouse enrollment → Group Health → Life Insurance → Salary Redirection
+- `married_with_dependents` → Spouse + Dependent enrollment → Group Health → Life Insurance → Salary Redirection
+- `single_with_dependents` → Dependent enrollment (no spouse step) → Group Health → Life Insurance → Salary Redirection
+- `single` → Group Health → Life Insurance → Salary Redirection (skip all family steps)
+
+### Plan Selection Rules
+- IMS health plan selection is **mutually exclusive**: NoMedical / MEC / Standard / BuyUp — only one can be active
+- Dental and vision are independent voluntary elections
+- Employee can refuse dental/vision with a documented reason (required field)
+
+### Beneficiary Rules
+- Primary beneficiaries' percentages must total exactly 100%
+- Contingent beneficiaries are a separate pool — their percentages must also total 100%
+- Both Primary and Contingent can coexist on the same employee record
+- Beneficiaries are tied to the life insurance enrollment, not the employee directly
+
+### Deduction Categories (Salary Redirection — 10 categories)
+Each has a pre-tax/post-tax flag and a premium amount:
+1. Medical
+2. Dental
+3. Vision
+4. Accident
+5. Cancer
+6. Short-Term Disability
+7. Hospital Indemnity
+8. Term Life
+9. Whole Life
+10. Other
+
+### Duplicate Enrollment Prevention
+- Check for existing group health / life insurance record before creating new
+- Return error "Record already exists" if found — do not silently overwrite
+
+### Cascade Delete Order
+When deleting an employee, cascade must follow this order to avoid FK violations:
+1. Beneficiaries
+2. Deductions
+3. Other insurance records
+4. Family members (spouse, dependents)
+5. Life insurance enrollment
+6. Group health enrollment
+7. Employee record
+
+Use `onDelete: 'cascade'` on all FK references in Drizzle schema.
 
 ---
 
