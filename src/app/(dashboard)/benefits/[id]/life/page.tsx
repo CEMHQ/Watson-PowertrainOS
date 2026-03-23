@@ -1,259 +1,323 @@
 'use client'
 
-import { useState } from 'react'
-import { useParams, useRouter } from 'next/navigation'
-import Image from 'next/image'
+import { useState, useEffect } from 'react'
+import { useRouter, useParams } from 'next/navigation'
+import Link from 'next/link'
+import { ArrowLeft, Loader2, CheckCircle2 } from 'lucide-react'
 
-// TODO: Connected to Supabase via /api/benefits
+const inputClass =
+  'rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring w-full'
+const labelClass = 'block text-xs font-medium text-muted-foreground mb-1.5'
 
-interface Dependent {
-  name: string
-  dob: string
-  relationship: string
-}
+const ENROLLMENT_TYPES = [
+  { value: 'initial',       label: 'Initial Enrollment'    },
+  { value: 're_enrollment', label: 'Re-Enrollment'         },
+  { value: 'add',           label: 'Add Coverage'          },
+  { value: 'drop',          label: 'Drop Coverage'         },
+  { value: 'change',        label: 'Change Coverage'       },
+]
 
-interface FormData {
-  firstName: string
-  lastName: string
-  ssn: string
-  dateOfBirth: string
-  address: string
-  city: string
-  state: string
-  zip: string
-  phone: string
-  email: string
-  maritalStatus: string
-  spouseName: string
-  spouseDOB: string
-  dependents: Dependent[]
-}
+const DENTAL_RATES = [
+  { value: 'employee_only',     label: 'Employee Only',     monthly: '$28.36', percheck: '$13.09' },
+  { value: 'employee_spouse',   label: 'Employee + Spouse', monthly: '$57.29', percheck: '$26.44' },
+  { value: 'employee_children', label: 'Employee + Children', monthly: '$68.25', percheck: '$31.50' },
+  { value: 'employee_family',   label: 'Employee + Family', monthly: '$97.19', percheck: '$44.86' },
+]
 
-const GuardianLifeEnrollment = () => {
+const VISION_RATES = [
+  { value: 'employee_only',     label: 'Employee Only',     monthly: '$7.97',  percheck: '$3.68' },
+  { value: 'employee_spouse',   label: 'Employee + Spouse', monthly: '$13.40', percheck: '$6.19' },
+  { value: 'employee_children', label: 'Employee + Children', monthly: '$13.67', percheck: '$6.31' },
+  { value: 'employee_family',   label: 'Employee + Family', monthly: '$21.64', percheck: '$9.99' },
+]
+
+export default function LifeInsurancePage() {
   const { id } = useParams<{ id: string }>()
-  const [currentPage, setCurrentPage] = useState(0)
-  const [showModal, setShowModal] = useState(false)
   const router = useRouter()
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [saved, setSaved] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
-  const [formData, setFormData] = useState<FormData>({
-    firstName: '',
-    lastName: '',
-    ssn: '',
-    dateOfBirth: '',
-    address: '',
-    city: '',
-    state: '',
-    zip: '',
-    phone: '',
-    email: '',
-    maritalStatus: '',
-    spouseName: '',
-    spouseDOB: '',
-    dependents: [{ name: '', dob: '', relationship: '' }],
-  })
+  const [enrollmentType, setEnrollmentType] = useState('initial')
+  const [electsDental, setElectsDental] = useState(false)
+  const [dentalTier, setDentalTier] = useState('employee_only')
+  const [dentalRefusal, setDentalRefusal] = useState('')
+  const [electsVision, setElectsVision] = useState(false)
+  const [visionTier, setVisionTier] = useState('employee_only')
+  const [visionRefusal, setVisionRefusal] = useState('')
+  const [electsBasicLife, setElectsBasicLife] = useState(true)
+  const [effectiveDate, setEffectiveDate] = useState('')
 
-  const handleChange = (
-    e: React.ChangeEvent<HTMLInputElement>,
-    index?: number,
-    field?: string
-  ) => {
-    if (index !== undefined && field) {
-      const deps = [...formData.dependents]
-      deps[index] = { ...deps[index], [field]: e.target.value }
-      setFormData({ ...formData, dependents: deps })
-    } else {
-      setFormData({ ...formData, [e.target.name]: e.target.value })
-    }
-  }
-
-  const addDependent = () => {
-    if (formData.dependents.length < 4) {
-      setFormData({
-        ...formData,
-        dependents: [...formData.dependents, { name: '', dob: '', relationship: '' }],
+  useEffect(() => {
+    fetch(`/api/benefits/life?employeeId=${id}`)
+      .then((r) => r.json())
+      .then((data) => {
+        if (data) {
+          setEnrollmentType(data.enrollmentType ?? 'initial')
+          setElectsDental(data.electsDental ?? false)
+          setDentalTier(data.dentalCoverageTier ?? 'employee_only')
+          setDentalRefusal(data.dentalRefusalReason ?? '')
+          setElectsVision(data.electsVision ?? false)
+          setVisionTier(data.visionCoverageTier ?? 'employee_only')
+          setVisionRefusal(data.visionRefusalReason ?? '')
+          setElectsBasicLife(data.electsBasicLife ?? true)
+          setEffectiveDate(data.effectiveDate ?? '')
+        }
       })
-    }
-  }
-
-  const removeDependent = (index: number) => {
-    const updatedDependents = formData.dependents.filter((_, idx) => idx !== index)
-    setFormData({ ...formData, dependents: updatedDependents })
-  }
-
-  const handleNext = () => setCurrentPage(currentPage + 1)
-  const handlePrev = () => setCurrentPage(currentPage - 1)
-
-  const handleReturn = () => {
-    router.push('/benefits')
-  }
-
-  const handleContinueToAirMed = () => {
-    router.push(`/benefits/${id}/airmed`)
-  }
+      .finally(() => setLoading(false))
+  }, [id])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    try {
-      // TODO: Connected to Supabase via /api/benefits
-      const res = await fetch('/api/benefits', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...formData, type: 'guardian_life', employeeId: id }),
-      })
+    setSaving(true)
+    setError(null)
+    setSaved(false)
 
-      if (res.ok) {
-        setShowModal(true)
-      } else {
-        alert('Submission failed. Please try again.')
-      }
-    } catch (err) {
-      console.error('Error submitting form:', err)
-      alert('An error occurred. Please try again later.')
+    const res = await fetch('/api/benefits/life', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        employeeId: id,
+        enrollmentType,
+        electsDental,
+        dentalCoverageTier: electsDental ? dentalTier : null,
+        dentalRefusalReason: !electsDental ? (dentalRefusal || null) : null,
+        electsVision,
+        visionCoverageTier: electsVision ? visionTier : null,
+        visionRefusalReason: !electsVision ? (visionRefusal || null) : null,
+        electsBasicLife,
+        effectiveDate: effectiveDate || null,
+      }),
+    })
+
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}))
+      setError(data.error ?? 'Failed to save enrollment')
+      setSaving(false)
+      return
     }
+
+    setSaved(true)
+    setSaving(false)
+  }
+
+  if (loading) {
+    return (
+      <div className="p-6 flex items-center gap-2 text-muted-foreground">
+        <Loader2 className="h-4 w-4 animate-spin" />
+        <span className="text-sm">Loading enrollment…</span>
+      </div>
+    )
   }
 
   return (
-    <div className="max-w-2xl mx-auto p-8">
-      <div className="flex justify-center mb-6">
-        <Image src="/images/guardian-life.jpg" alt="Guardian Life" width={300} height={100} />
-      </div>
-
-      <form onSubmit={handleSubmit} className="space-y-4">
-        {currentPage === 0 && (
-          <div className="space-y-4">
-            <h2 className="text-xl font-semibold">Employee Information</h2>
-            {[
-              { name: 'firstName', placeholder: 'First Name', type: 'text' },
-              { name: 'lastName', placeholder: 'Last Name', type: 'text' },
-              { name: 'ssn', placeholder: 'Social Security Number', type: 'text' },
-              { name: 'dateOfBirth', placeholder: 'Date of Birth', type: 'date' },
-              { name: 'address', placeholder: 'Address', type: 'text' },
-              { name: 'city', placeholder: 'City', type: 'text' },
-              { name: 'state', placeholder: 'State', type: 'text' },
-              { name: 'zip', placeholder: 'Zip', type: 'text' },
-              { name: 'phone', placeholder: 'Phone Number', type: 'text' },
-              { name: 'email', placeholder: 'Email', type: 'email' },
-            ].map(({ name, placeholder, type }) => (
-              <input
-                key={name}
-                className="border rounded px-3 py-2 w-full"
-                name={name}
-                placeholder={placeholder}
-                type={type}
-                value={formData[name as keyof FormData] as string}
-                onChange={handleChange}
-                required
-              />
-            ))}
-            <div className="flex gap-3">
-              <button type="button" onClick={handlePrev} className="border rounded px-4 py-2">Previous</button>
-              <button type="button" onClick={handleNext} className="bg-primary text-primary-foreground px-4 py-2 rounded">Next</button>
-            </div>
-          </div>
-        )}
-
-        {currentPage === 1 && (
-          <div className="space-y-4">
-            <h2 className="text-xl font-semibold">Family Information</h2>
-            <input
-              className="border rounded px-3 py-2 w-full"
-              name="maritalStatus"
-              placeholder="Marital Status"
-              value={formData.maritalStatus}
-              onChange={handleChange}
-              required
-            />
-            <input
-              className="border rounded px-3 py-2 w-full"
-              name="spouseName"
-              placeholder="Spouse's Name"
-              value={formData.spouseName}
-              onChange={handleChange}
-            />
-            <input
-              className="border rounded px-3 py-2 w-full"
-              type="date"
-              name="spouseDOB"
-              value={formData.spouseDOB}
-              onChange={handleChange}
-            />
-            <h3 className="font-semibold">Dependents</h3>
-            {formData.dependents.map((dep, index) => (
-              <div key={index} className="border border-border rounded p-4 space-y-2">
-                <input
-                  className="border rounded px-3 py-2 w-full"
-                  placeholder="Dependent Name"
-                  value={dep.name}
-                  onChange={(e) => handleChange(e, index, 'name')}
-                />
-                <input
-                  className="border rounded px-3 py-2 w-full"
-                  type="date"
-                  placeholder="DOB"
-                  value={dep.dob}
-                  onChange={(e) => handleChange(e, index, 'dob')}
-                />
-                <input
-                  className="border rounded px-3 py-2 w-full"
-                  placeholder="Relationship"
-                  value={dep.relationship}
-                  onChange={(e) => handleChange(e, index, 'relationship')}
-                />
-                <button
-                  type="button"
-                  className="text-destructive text-sm"
-                  onClick={() => removeDependent(index)}
-                >
-                  Remove
-                </button>
-              </div>
-            ))}
-            {formData.dependents.length < 4 && (
-              <button type="button" className="border rounded px-4 py-2" onClick={addDependent}>
-                Add Dependent
-              </button>
-            )}
-            <div className="flex gap-3">
-              <button type="button" onClick={handlePrev} className="border rounded px-4 py-2">Previous</button>
-              <button type="submit" className="bg-primary text-primary-foreground px-4 py-2 rounded">Submit Enrollment</button>
-            </div>
-          </div>
-        )}
-      </form>
-
-      <div className="mt-6">
-        <button
-          className="border rounded px-4 py-2 hover:bg-muted transition-colors"
-          onClick={handleReturn}
+    <div className="p-6 max-w-2xl space-y-6">
+      <div>
+        <Link
+          href={`/benefits/${id}`}
+          className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors mb-4"
         >
-          Return to Dashboard
-        </button>
+          <ArrowLeft className="h-3.5 w-3.5" />
+          Back to Enrollment Hub
+        </Link>
+        <h1 className="text-2xl font-semibold text-foreground">Life Insurance Enrollment</h1>
+        <p className="text-sm text-muted-foreground mt-0.5">Guardian Group Plan 00483632</p>
       </div>
 
-      {showModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-card rounded-lg p-6 max-w-sm w-full space-y-4">
-            <p>Your Guardian Life form was submitted successfully.</p>
-            <p>Would you like to continue to AirMedCare Network Enrollment?</p>
-            <div className="flex gap-3">
+      <form onSubmit={handleSubmit} className="space-y-6">
+        {/* Enrollment type */}
+        <div className="rounded-lg border border-border bg-card p-5">
+          <label className={`${labelClass} mb-3`}>Enrollment Type</label>
+          <div className="flex flex-wrap gap-2">
+            {ENROLLMENT_TYPES.map((t) => (
               <button
-                className="bg-primary text-primary-foreground px-4 py-2 rounded"
-                onClick={handleContinueToAirMed}
+                key={t.value}
+                type="button"
+                onClick={() => setEnrollmentType(t.value)}
+                className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors border ${
+                  enrollmentType === t.value
+                    ? 'bg-primary text-primary-foreground border-primary'
+                    : 'border-border text-muted-foreground hover:bg-muted/50'
+                }`}
               >
-                Yes, Continue
+                {t.label}
               </button>
-              <button
-                className="border rounded px-4 py-2"
-                onClick={() => setShowModal(false)}
-              >
-                No, Stay Here
-              </button>
-            </div>
+            ))}
           </div>
         </div>
-      )}
+
+        {/* Basic Life AD&D */}
+        <div className="rounded-lg border border-border bg-card p-5">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm font-semibold text-foreground">Basic Life AD&amp;D</p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Amount determined by enrollment class (Owner / Manager / Employee)
+              </p>
+            </div>
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={electsBasicLife}
+                onChange={(e) => setElectsBasicLife(e.target.checked)}
+                className="rounded"
+              />
+              <span className="text-sm text-foreground">Elect</span>
+            </label>
+          </div>
+        </div>
+
+        {/* Dental */}
+        <div className="rounded-lg border border-border bg-card overflow-hidden">
+          <div className="px-5 py-3 bg-muted/30 border-b border-border flex items-center justify-between">
+            <h2 className="text-sm font-semibold text-foreground">Dental — Guardian Voluntary Indemnity</h2>
+            <label className="flex items-center gap-2 cursor-pointer text-sm text-foreground">
+              <input
+                type="checkbox"
+                checked={electsDental}
+                onChange={(e) => setElectsDental(e.target.checked)}
+                className="rounded"
+              />
+              Elect dental
+            </label>
+          </div>
+          <div className="p-5">
+            {electsDental ? (
+              <div className="space-y-2">
+                {DENTAL_RATES.map((t) => (
+                  <label
+                    key={t.value}
+                    className={`flex items-center gap-3 rounded-lg border px-4 py-3 cursor-pointer transition-colors ${
+                      dentalTier === t.value
+                        ? 'border-primary bg-accent/50'
+                        : 'border-border hover:bg-muted/30'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="dentalTier"
+                      value={t.value}
+                      checked={dentalTier === t.value}
+                      onChange={() => setDentalTier(t.value)}
+                    />
+                    <span className="flex-1 text-sm font-medium text-foreground">{t.label}</span>
+                    <span className="text-xs text-muted-foreground">{t.monthly}/mo · {t.percheck}/paycheck</span>
+                  </label>
+                ))}
+              </div>
+            ) : (
+              <div>
+                <label className={labelClass}>Reason for declining dental</label>
+                <textarea
+                  value={dentalRefusal}
+                  onChange={(e) => setDentalRefusal(e.target.value)}
+                  rows={2}
+                  className={`${inputClass} resize-none`}
+                  placeholder="e.g., Covered under spouse's plan…"
+                />
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Vision */}
+        <div className="rounded-lg border border-border bg-card overflow-hidden">
+          <div className="px-5 py-3 bg-muted/30 border-b border-border flex items-center justify-between">
+            <h2 className="text-sm font-semibold text-foreground">Vision — Guardian VSP Choice</h2>
+            <label className="flex items-center gap-2 cursor-pointer text-sm text-foreground">
+              <input
+                type="checkbox"
+                checked={electsVision}
+                onChange={(e) => setElectsVision(e.target.checked)}
+                className="rounded"
+              />
+              Elect vision
+            </label>
+          </div>
+          <div className="p-5">
+            {electsVision ? (
+              <div className="space-y-2">
+                {VISION_RATES.map((t) => (
+                  <label
+                    key={t.value}
+                    className={`flex items-center gap-3 rounded-lg border px-4 py-3 cursor-pointer transition-colors ${
+                      visionTier === t.value
+                        ? 'border-primary bg-accent/50'
+                        : 'border-border hover:bg-muted/30'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="visionTier"
+                      value={t.value}
+                      checked={visionTier === t.value}
+                      onChange={() => setVisionTier(t.value)}
+                    />
+                    <span className="flex-1 text-sm font-medium text-foreground">{t.label}</span>
+                    <span className="text-xs text-muted-foreground">{t.monthly}/mo · {t.percheck}/paycheck</span>
+                  </label>
+                ))}
+              </div>
+            ) : (
+              <div>
+                <label className={labelClass}>Reason for declining vision</label>
+                <textarea
+                  value={visionRefusal}
+                  onChange={(e) => setVisionRefusal(e.target.value)}
+                  rows={2}
+                  className={`${inputClass} resize-none`}
+                  placeholder="e.g., Covered under spouse's plan…"
+                />
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Effective date */}
+        <div className="rounded-lg border border-border bg-card p-5">
+          <label className={labelClass}>Effective Date</label>
+          <input
+            type="date"
+            value={effectiveDate}
+            onChange={(e) => setEffectiveDate(e.target.value)}
+            className={inputClass}
+          />
+        </div>
+
+        {error && (
+          <p className="text-xs text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-900 rounded-md px-3 py-2">
+            {error}
+          </p>
+        )}
+
+        {saved && (
+          <p className="text-xs text-green-700 dark:text-green-400 flex items-center gap-1.5">
+            <CheckCircle2 className="h-3.5 w-3.5" />
+            Life insurance enrollment saved.
+          </p>
+        )}
+
+        <div className="flex items-center gap-3">
+          <button
+            type="submit"
+            disabled={saving}
+            className="flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-colors"
+          >
+            {saving && <Loader2 className="h-4 w-4 animate-spin" />}
+            {saving ? 'Saving…' : 'Save Enrollment'}
+          </button>
+          {saved && (
+            <button
+              type="button"
+              onClick={() => router.push(`/benefits/${id}/beneficiaries`)}
+              className="rounded-md px-4 py-2 text-sm text-primary hover:text-primary/80 font-medium transition-colors"
+            >
+              Continue to Beneficiaries →
+            </button>
+          )}
+        </div>
+      </form>
     </div>
   )
 }
-
-export default GuardianLifeEnrollment

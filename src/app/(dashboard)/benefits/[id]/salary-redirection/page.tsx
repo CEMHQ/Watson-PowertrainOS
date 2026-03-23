@@ -1,322 +1,295 @@
 'use client'
 
-import { useState } from 'react'
-import { useRouter, useParams } from 'next/navigation'
+import { useState, useEffect } from 'react'
+import { useParams, useRouter } from 'next/navigation'
+import Link from 'next/link'
+import { ArrowLeft, Loader2, CheckCircle2 } from 'lucide-react'
 
-// TODO: Connected to Supabase via /api/benefits
+const inputClass =
+  'rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring w-full'
+const labelClass = 'block text-xs font-medium text-muted-foreground mb-1.5'
 
-interface FormData {
-  lastName: string
-  firstName: string
-  middleInitial: string
-  address: string
-  cityStateZip: string
-  ssn: string
-  hireDate: string
-  effectiveDate: string
-  medicalPreTax: string
-  medicalPreTaxAmount: string
-  medicalPostTax: string
-  medicalPostTaxAmount: string
-  understand1: string
-  understand2: string
-  understand3: string
-  understand4: string
-  waiver: string
-  employeeSignature: string
-  signatureDate: string
+const CATEGORIES = [
+  { key: 'medical',   label: 'Medical',              provider: 'Insurance Management Services' },
+  { key: 'dental',    label: 'Dental',               provider: 'Guardian Life Insurance'       },
+  { key: 'vision',    label: 'Vision',               provider: 'Guardian Life Insurance'       },
+  { key: 'accident',  label: 'Accident',             provider: 'Guardian Life Insurance'       },
+  { key: 'cancer',    label: 'Cancer',               provider: 'Guardian Life Insurance'       },
+  { key: 'std',       label: 'Short-Term Disability', provider: 'Guardian Life Insurance'      },
+  { key: 'hospital',  label: 'Hospital',             provider: 'Guardian Life Insurance'       },
+  { key: 'termLife',  label: 'Term Life',            provider: 'Guardian Life Insurance'       },
+  { key: 'wholeLife', label: 'Whole Life',           provider: 'Guardian Life Insurance'       },
+  { key: 'other',     label: 'Other',                provider: ''                              },
+] as const
+
+type CategoryKey = (typeof CATEGORIES)[number]['key']
+
+interface Row {
+  preTax: boolean
+  amount: string
 }
 
-const SalaryRedirectionAgreement = () => {
-  const [formData, setFormData] = useState<FormData>({
-    lastName: '',
-    firstName: '',
-    middleInitial: '',
-    address: '',
-    cityStateZip: '',
-    ssn: '',
-    hireDate: '',
-    effectiveDate: '',
-    medicalPreTax: '',
-    medicalPreTaxAmount: '',
-    medicalPostTax: '',
-    medicalPostTaxAmount: '',
-    understand1: '',
-    understand2: '',
-    understand3: '',
-    understand4: '',
-    waiver: '',
-    employeeSignature: '',
-    signatureDate: '',
-  })
+type Rows = Record<CategoryKey, Row>
 
-  const [currentSection, setCurrentSection] = useState(1)
-  const [showModal, setShowModal] = useState(false)
-  const router = useRouter()
+const defaultRows = (): Rows =>
+  Object.fromEntries(
+    CATEGORIES.map(({ key }) => [key, { preTax: true, amount: '' }])
+  ) as Rows
+
+export default function SalaryRedirectionPage() {
   const { id } = useParams<{ id: string }>()
+  const router = useRouter()
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [saved, setSaved] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setFormData({ ...formData, [e.target.name]: e.target.value })
-  }
+  const [rows, setRows] = useState<Rows>(defaultRows())
+  const [otherDescription, setOtherDescription] = useState('')
+  const [effectiveDate, setEffectiveDate] = useState('')
 
-  const handleNextSection = () => {
-    if (currentSection < 3) setCurrentSection(currentSection + 1)
-  }
+  useEffect(() => {
+    fetch(`/api/benefits/salary-redirection?employeeId=${id}`)
+      .then((r) => r.json())
+      .then((data) => {
+        if (data) {
+          const updated = defaultRows()
+          for (const { key } of CATEGORIES) {
+            const preTaxKey = `${key}PreTax` as keyof typeof data
+            const amountKey = `${key}Amount` as keyof typeof data
+            updated[key] = {
+              preTax: data[preTaxKey] ?? true,
+              amount: data[amountKey] ?? '',
+            }
+          }
+          setRows(updated)
+          setOtherDescription(data.otherDescription ?? '')
+          setEffectiveDate(data.effectiveDate ?? '')
+        }
+      })
+      .finally(() => setLoading(false))
+  }, [id])
 
-  const handlePrevSection = () => {
-    if (currentSection > 1) setCurrentSection(currentSection - 1)
-  }
+  const setRow = (key: CategoryKey, patch: Partial<Row>) =>
+    setRows((prev) => ({ ...prev, [key]: { ...prev[key], ...patch } }))
 
-  const handleReturnToDashboard = () => {
-    router.push('/benefits')
-  }
+  const preTaxTotal = CATEGORIES.reduce((sum, { key }) => {
+    const r = rows[key]
+    return r.preTax && r.amount ? sum + parseFloat(r.amount) : sum
+  }, 0)
 
-  const handleContinueToHealth = () => {
-    router.push(`/benefits/${id}/health`)
-  }
+  const postTaxTotal = CATEGORIES.reduce((sum, { key }) => {
+    const r = rows[key]
+    return !r.preTax && r.amount ? sum + parseFloat(r.amount) : sum
+  }, 0)
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    setSaving(true)
+    setError(null)
+    setSaved(false)
 
-    try {
-      // TODO: Connected to Supabase via /api/benefits
-      const res = await fetch('/api/benefits', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...formData, type: 'salary_redirection', employeeId: id }),
-      })
-
-      if (res.ok) {
-        setShowModal(true)
-      } else {
-        alert('Something went wrong. Please try again.')
-      }
-    } catch (err) {
-      console.error('Submission error:', err)
-      alert('Error submitting the form.')
+    const body: Record<string, unknown> = { employeeId: id, otherDescription: otherDescription || null }
+    for (const { key } of CATEGORIES) {
+      body[`${key}PreTax`] = rows[key].preTax
+      body[`${key}Amount`] = rows[key].amount || null
     }
+
+    const res = await fetch('/api/benefits/salary-redirection', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}))
+      setError(data.error ?? 'Failed to save')
+      setSaving(false)
+      return
+    }
+
+    setSaved(true)
+    setSaving(false)
+  }
+
+  if (loading) {
+    return (
+      <div className="p-6 flex items-center gap-2 text-muted-foreground">
+        <Loader2 className="h-4 w-4 animate-spin" />
+        <span className="text-sm">Loading…</span>
+      </div>
+    )
   }
 
   return (
-    <div className="max-w-2xl mx-auto p-8 space-y-6">
-      {currentSection === 1 && (
-        <div className="space-y-4">
-          <h2 className="text-xl font-semibold">Salary Redirection Agreement - Section 1</h2>
-          <p className="text-sm text-muted-foreground">
-            EMPLOYER: Watson Truck & Supply, Inc. CAFETERIA PLAN YEAR: 1/1/2019 thru 12/31/2019
-          </p>
-
-          {[
-            { name: 'lastName', label: 'Name (Last)', type: 'text' },
-            { name: 'firstName', label: 'Name (First)', type: 'text' },
-            { name: 'middleInitial', label: 'Middle Initial', type: 'text' },
-            { name: 'address', label: 'Address', type: 'text' },
-            { name: 'cityStateZip', label: 'City/State/Zip', type: 'text' },
-            { name: 'ssn', label: 'Social Security Number', type: 'text' },
-            { name: 'hireDate', label: 'Hire Date', type: 'date' },
-            { name: 'effectiveDate', label: 'Effective Date', type: 'date' },
-          ].map(({ name, label, type }) => (
-            <label key={name} className="flex flex-col gap-1">
-              <span className="font-medium">{label}:</span>
-              <input
-                className="border rounded px-3 py-2 w-full"
-                type={type}
-                name={name}
-                value={formData[name as keyof FormData]}
-                onChange={handleChange}
-              />
-            </label>
-          ))}
-
-          <p className="text-sm text-muted-foreground">
-            On a separate benefit enrollment form(s), I have enrolled for certain insurance coverage(s) and understand
-            that my insurance premiums election amount will be deducted from my paycheck by my employer...
-          </p>
-
-          <div className="flex justify-end">
-            <button
-              type="button"
-              onClick={handleNextSection}
-              className="bg-primary text-primary-foreground px-4 py-2 rounded"
-            >
-              Next Section
-            </button>
-          </div>
-        </div>
-      )}
-
-      {currentSection === 2 && (
-        <div className="space-y-4">
-          <h2 className="text-xl font-semibold">Salary Redirection Agreement - Section 2</h2>
-          <div className="overflow-x-auto">
-            <table className="w-full border-collapse text-sm">
-              <thead>
-                <tr className="bg-muted">
-                  <th className="border border-border p-2 text-left">Coverage</th>
-                  <th className="border border-border p-2 text-left">Provider</th>
-                  <th className="border border-border p-2 text-left">EE Election Pre-tax</th>
-                  <th className="border border-border p-2 text-left">Premium Pre-Tax</th>
-                  <th className="border border-border p-2 text-left">EE Election Post-tax</th>
-                  <th className="border border-border p-2 text-left">Premium Post-Tax</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr>
-                  <td className="border border-border p-2">Medical</td>
-                  <td className="border border-border p-2">Insurance Management Services</td>
-                  <td className="border border-border p-2">
-                    <input
-                      className="border rounded px-2 py-1 w-24"
-                      type="number"
-                      name="medicalPreTax"
-                      value={formData.medicalPreTax}
-                      onChange={handleChange}
-                    />
-                  </td>
-                  <td className="border border-border p-2">
-                    <input
-                      className="border rounded px-2 py-1 w-24"
-                      type="number"
-                      name="medicalPreTaxAmount"
-                      value={formData.medicalPreTaxAmount}
-                      onChange={handleChange}
-                    />
-                  </td>
-                  <td className="border border-border p-2">
-                    <input
-                      className="border rounded px-2 py-1 w-24"
-                      type="number"
-                      name="medicalPostTax"
-                      value={formData.medicalPostTax}
-                      onChange={handleChange}
-                    />
-                  </td>
-                  <td className="border border-border p-2">
-                    <input
-                      className="border rounded px-2 py-1 w-24"
-                      type="number"
-                      name="medicalPostTaxAmount"
-                      value={formData.medicalPostTaxAmount}
-                      onChange={handleChange}
-                    />
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-          <div>
-            <strong>Total Pre-Tax: </strong>
-            <strong>Total Post-Tax: </strong>
-          </div>
-          <div className="flex gap-3">
-            <button type="button" onClick={handlePrevSection} className="border rounded px-4 py-2">Previous</button>
-            <button type="button" onClick={handleNextSection} className="bg-primary text-primary-foreground px-4 py-2 rounded">Next</button>
-          </div>
-        </div>
-      )}
-
-      {currentSection === 3 && (
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <h2 className="text-xl font-semibold">Salary Redirection Agreement - Section 3</h2>
-          <p>I understand and agree to the following:</p>
-
-          {[1, 2, 3, 4].map((i) => (
-            <div key={i} className="flex gap-3 items-start">
-              <input
-                type="text"
-                name={`understand${i}`}
-                value={formData[`understand${i}` as keyof FormData]}
-                onChange={handleChange}
-                className="border rounded px-2 py-1 w-16 flex-shrink-0"
-                maxLength={2}
-                placeholder="Init"
-              />
-              <label className="text-sm">
-                {i === 1 && 'On or after the first day of the plan year, I cannot change or revoke this Salary Redirection Agreement...'}
-                {i === 2 && 'Execution of this Salary Redirection Agreement does not begin coverage under the component benefit plans...'}
-                {i === 3 && 'I hereby specifically authorize those parties to use my personal information...'}
-                {i === 4 && 'Paying for coverage on a pre-tax basis may cause insurance claim payments to be subject to federal and state taxes...'}
-              </label>
-            </div>
-          ))}
-
-          <div className="flex gap-3 items-start">
-            <input
-              type="text"
-              name="waiver"
-              value={formData.waiver}
-              onChange={handleChange}
-              className="border rounded px-2 py-1 w-16 flex-shrink-0"
-              maxLength={2}
-              placeholder="Init"
-            />
-            <label className="text-sm">
-              I certify that the features and benefits under the Benefits Plan have been explained to me...
-            </label>
-          </div>
-
-          <div className="flex flex-col gap-1">
-            <label className="font-medium">Employee Signature:</label>
-            <input
-              className="border rounded px-3 py-2 w-full"
-              name="employeeSignature"
-              value={formData.employeeSignature}
-              onChange={handleChange}
-              placeholder="Employee Signature"
-            />
-          </div>
-
-          <div className="flex flex-col gap-1">
-            <label className="font-medium">Date:</label>
-            <input
-              className="border rounded px-3 py-2 w-full"
-              type="date"
-              name="signatureDate"
-              value={formData.signatureDate}
-              onChange={handleChange}
-            />
-          </div>
-
-          <div className="flex gap-3">
-            <button type="button" onClick={handlePrevSection} className="border rounded px-4 py-2">Previous</button>
-            <button type="submit" className="bg-primary text-primary-foreground px-4 py-2 rounded">Submit</button>
-          </div>
-        </form>
-      )}
-
-      <div className="flex gap-3">
-        <button
-          className="border rounded px-4 py-2 hover:bg-muted transition-colors"
-          onClick={handleReturnToDashboard}
+    <div className="p-6 max-w-3xl space-y-6">
+      <div>
+        <Link
+          href={`/benefits/${id}`}
+          className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors mb-4"
         >
-          Return to Dashboard
-        </button>
+          <ArrowLeft className="h-3.5 w-3.5" />
+          Back to Enrollment Hub
+        </Link>
+        <h1 className="text-2xl font-semibold text-foreground">Salary Redirection Agreement</h1>
+        <p className="text-sm text-muted-foreground mt-0.5">
+          Watson Truck &amp; Supply, Inc. — Cafeteria Plan Year 1/1/2019 – 12/31/2019
+        </p>
       </div>
 
-      {showModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-card rounded-lg p-6 max-w-sm w-full space-y-4">
-            <p>Your form has been successfully submitted!</p>
-            <p>Would you like to continue to Group Health Insurance Enrollment?</p>
-            <div className="flex gap-3">
-              <button
-                className="bg-primary text-primary-foreground px-4 py-2 rounded"
-                onClick={handleContinueToHealth}
-              >
-                Yes, Continue
-              </button>
-              <button
-                className="border rounded px-4 py-2"
-                onClick={() => setShowModal(false)}
-              >
-                No, Stay Here
-              </button>
+      {/* Legal header */}
+      <div className="rounded-lg border border-border bg-muted/30 px-5 py-4 text-xs text-muted-foreground leading-relaxed">
+        On a separate benefit enrollment form(s), I have enrolled for certain insurance coverage(s) and understand
+        that my insurance premiums election amount will be deducted from my paycheck by my employer on a pre-tax
+        or post-tax basis as indicated below. I understand that this agreement shall remain in effect for the entire
+        plan year unless I have a qualifying change in status event as defined under Section 125 of the Internal
+        Revenue Code.
+      </div>
+
+      <form onSubmit={handleSubmit} className="space-y-6">
+        {/* Deduction table */}
+        <div className="rounded-lg border border-border bg-card overflow-hidden">
+          <div className="px-5 py-3 bg-muted/30 border-b border-border">
+            <h2 className="text-sm font-semibold text-foreground">Insurance Premium Elections</h2>
+            <p className="text-xs text-muted-foreground mt-0.5">Select pre-tax or post-tax and enter per-paycheck premium amount</p>
+          </div>
+          <div className="divide-y divide-border">
+            {CATEGORIES.map(({ key, label, provider }) => (
+              <div key={key} className="grid grid-cols-[1fr_auto_auto] items-center gap-4 px-5 py-3">
+                <div>
+                  <p className="text-sm font-medium text-foreground">{label}</p>
+                  {provider && <p className="text-xs text-muted-foreground">{provider}</p>}
+                  {key === 'other' && (
+                    <input
+                      value={otherDescription}
+                      onChange={(e) => setOtherDescription(e.target.value)}
+                      className="mt-1.5 rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring w-48"
+                      placeholder="Description…"
+                    />
+                  )}
+                </div>
+                {/* Pre/Post toggle */}
+                <div className="flex rounded-md border border-border overflow-hidden text-xs font-medium shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => setRow(key, { preTax: true })}
+                    className={`px-3 py-1.5 transition-colors ${
+                      rows[key].preTax
+                        ? 'bg-primary text-primary-foreground'
+                        : 'bg-background text-muted-foreground hover:bg-muted/50'
+                    }`}
+                  >
+                    Pre-Tax
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setRow(key, { preTax: false })}
+                    className={`px-3 py-1.5 border-l border-border transition-colors ${
+                      !rows[key].preTax
+                        ? 'bg-primary text-primary-foreground'
+                        : 'bg-background text-muted-foreground hover:bg-muted/50'
+                    }`}
+                  >
+                    Post-Tax
+                  </button>
+                </div>
+                {/* Amount */}
+                <div className="relative shrink-0 w-28">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">$</span>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={rows[key].amount}
+                    onChange={(e) => setRow(key, { amount: e.target.value })}
+                    className="rounded-md border border-border bg-background pl-6 pr-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring w-full"
+                    placeholder="0.00"
+                  />
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Totals */}
+          <div className="px-5 py-3 bg-muted/30 border-t border-border flex items-center gap-8">
+            <div>
+              <span className="text-xs text-muted-foreground">Total Pre-Tax</span>
+              <p className="text-sm font-semibold text-foreground">${preTaxTotal.toFixed(2)}<span className="text-xs font-normal text-muted-foreground">/paycheck</span></p>
+            </div>
+            <div>
+              <span className="text-xs text-muted-foreground">Total Post-Tax</span>
+              <p className="text-sm font-semibold text-foreground">${postTaxTotal.toFixed(2)}<span className="text-xs font-normal text-muted-foreground">/paycheck</span></p>
+            </div>
+            <div className="ml-auto">
+              <span className="text-xs text-muted-foreground">Grand Total</span>
+              <p className="text-sm font-semibold text-foreground">${(preTaxTotal + postTaxTotal).toFixed(2)}<span className="text-xs font-normal text-muted-foreground">/paycheck</span></p>
             </div>
           </div>
         </div>
-      )}
+
+        {/* Acknowledgements */}
+        <div className="rounded-lg border border-border bg-card p-5 space-y-4">
+          <h2 className="text-sm font-semibold text-foreground">Employee Acknowledgements</h2>
+          <div className="space-y-3 text-xs text-muted-foreground">
+            {[
+              'On or after the first day of the plan year, I cannot change or revoke this Salary Redirection Agreement except upon the occurrence of a qualifying change in status event.',
+              'Execution of this Salary Redirection Agreement does not begin coverage under the component benefit plans. Separate enrollment forms must be completed to begin coverage.',
+              'I hereby specifically authorize those parties to use my personal information in connection with the administration of the benefit plan.',
+              'Paying for coverage on a pre-tax basis may cause insurance claim payments to be subject to federal and state taxes under certain circumstances.',
+              'I certify that the features and benefits under the Benefits Plan have been explained to me and I understand my rights and obligations under the plan.',
+            ].map((text, i) => (
+              <div key={i} className="flex gap-3 items-start leading-relaxed">
+                <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-semibold text-foreground">{i + 1}</span>
+                <p>{text}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Effective date */}
+        <div className="rounded-lg border border-border bg-card p-5">
+          <label className={labelClass}>Effective Date</label>
+          <input
+            type="date"
+            value={effectiveDate}
+            onChange={(e) => setEffectiveDate(e.target.value)}
+            className={inputClass}
+          />
+        </div>
+
+        {error && (
+          <p className="text-xs text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-900 rounded-md px-3 py-2">
+            {error}
+          </p>
+        )}
+
+        {saved && (
+          <p className="text-xs text-green-700 dark:text-green-400 flex items-center gap-1.5">
+            <CheckCircle2 className="h-3.5 w-3.5" />
+            Salary redirection agreement saved.
+          </p>
+        )}
+
+        <div className="flex items-center gap-3">
+          <button
+            type="submit"
+            disabled={saving}
+            className="flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-colors"
+          >
+            {saving && <Loader2 className="h-4 w-4 animate-spin" />}
+            {saving ? 'Saving…' : 'Save Agreement'}
+          </button>
+          {saved && (
+            <button
+              type="button"
+              onClick={() => router.push(`/benefits/${id}`)}
+              className="rounded-md px-4 py-2 text-sm text-primary hover:text-primary/80 font-medium transition-colors"
+            >
+              Back to Enrollment Hub →
+            </button>
+          )}
+        </div>
+      </form>
     </div>
   )
 }
-
-export default SalaryRedirectionAgreement

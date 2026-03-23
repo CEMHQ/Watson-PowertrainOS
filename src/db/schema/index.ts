@@ -74,6 +74,30 @@ export const drugTestResultEnum = pgEnum('drug_test_result', [
   'negative', 'positive', 'pending', 'cancelled',
 ])
 
+export const maritalStatusEnum = pgEnum('marital_status', [
+  'single', 'married', 'married_with_dependents', 'single_with_dependents',
+])
+
+export const enrollmentClassEnum = pgEnum('enrollment_class', [
+  'owner', 'manager', 'employee',
+])
+
+export const healthPlanEnum = pgEnum('health_plan', [
+  'none', 'mec', 'standard', 'buy_up',
+])
+
+export const coverageTierEnum = pgEnum('coverage_tier', [
+  'employee_only', 'employee_spouse', 'employee_children', 'employee_family',
+])
+
+export const familyMemberTypeEnum = pgEnum('family_member_type', [
+  'spouse', 'dependent',
+])
+
+export const beneficiaryTypeEnum = pgEnum('beneficiary_type', [
+  'primary', 'contingent',
+])
+
 // ─── Companies ────────────────────────────────────────────────────────────────
 
 export const companies = pgTable('companies', {
@@ -121,6 +145,19 @@ export const employees = pgTable('employees', {
   cdlNumber: text('cdl_number'),
   cdlState: text('cdl_state'),
   supabaseUserId: text('supabase_user_id').unique(),
+  // Personal / benefits fields
+  jobTitle: text('job_title'),
+  department: text('department'),
+  dateOfBirth: date('date_of_birth'),
+  address: text('address'),
+  city: text('city'),
+  state: text('state'),
+  zip: text('zip'),
+  county: text('county'),
+  maritalStatus: maritalStatusEnum('marital_status'),
+  enrollmentClass: enrollmentClassEnum('enrollment_class').default('employee'),
+  annualSalary: numeric('annual_salary', { precision: 10, scale: 2 }),
+  hoursPerWeek: numeric('hours_per_week', { precision: 4, scale: 1 }),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 })
@@ -229,6 +266,134 @@ export const driverRiskScores = pgTable('driver_risk_scores', {
   calculatedAt: timestamp('calculated_at').defaultNow().notNull(),
 })
 
+// ─── Family Members ───────────────────────────────────────────────────────────
+
+export const familyMembers = pgTable('family_members', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  employeeId: uuid('employee_id').references(() => employees.id, { onDelete: 'cascade' }).notNull(),
+  memberType: familyMemberTypeEnum('member_type').notNull(),
+  firstName: text('first_name').notNull(),
+  lastName: text('last_name').notNull(),
+  dateOfBirth: date('date_of_birth'),
+  gender: text('gender'),
+  relationship: text('relationship'),
+  address: text('address'),
+  city: text('city'),
+  state: text('state'),
+  zip: text('zip'),
+  // Spouse employer info
+  employerName: text('employer_name'),
+  employerAddress: text('employer_address'),
+  employerPhone: text('employer_phone'),
+  // Dependent flags
+  isStudent: boolean('is_student').default(false),
+  isDisabled: boolean('is_disabled').default(false),
+  // Other insurance
+  hasOtherMedical: boolean('has_other_medical').default(false),
+  hasOtherDental: boolean('has_other_dental').default(false),
+  hasOtherVision: boolean('has_other_vision').default(false),
+  otherInsuranceCarrier: text('other_insurance_carrier'),
+  otherInsurancePolicyNumber: text('other_insurance_policy_number'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+})
+
+// ─── Group Health Enrollments ─────────────────────────────────────────────────
+
+export const groupHealthEnrollments = pgTable('group_health_enrollments', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  employeeId: uuid('employee_id').references(() => employees.id, { onDelete: 'cascade' }).notNull().unique(),
+  imsGroupNumber: text('ims_group_number').notNull().default('SWT0906'),
+  healthPlan: healthPlanEnum('health_plan').notNull().default('none'),
+  coverageTier: coverageTierEnum('coverage_tier'),
+  refusalReason: text('refusal_reason'),
+  // HIPAA authorization form
+  authorizedPerson1Name: text('authorized_person1_name'),
+  authorizedPerson1Phone: text('authorized_person1_phone'),
+  authorizedPerson2Name: text('authorized_person2_name'),
+  authorizedPerson2Phone: text('authorized_person2_phone'),
+  authorizedPerson3Name: text('authorized_person3_name'),
+  authorizedPerson3Phone: text('authorized_person3_phone'),
+  employeeSignedAt: timestamp('employee_signed_at'),
+  effectiveDate: date('effective_date'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+})
+
+// ─── Life Insurance Enrollments ───────────────────────────────────────────────
+
+export const lifeInsuranceEnrollments = pgTable('life_insurance_enrollments', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  employeeId: uuid('employee_id').references(() => employees.id, { onDelete: 'cascade' }).notNull().unique(),
+  groupPlanNumber: text('group_plan_number').notNull().default('00483632'),
+  enrollmentType: text('enrollment_type').notNull().default('initial'),
+  // Dental
+  electsDental: boolean('elects_dental').default(false),
+  dentalCoverageTier: coverageTierEnum('dental_coverage_tier'),
+  dentalRefusalReason: text('dental_refusal_reason'),
+  // Vision
+  electsVision: boolean('elects_vision').default(false),
+  visionCoverageTier: coverageTierEnum('vision_coverage_tier'),
+  visionRefusalReason: text('vision_refusal_reason'),
+  electsBasicLife: boolean('elects_basic_life').default(true),
+  employeeSignedAt: timestamp('employee_signed_at'),
+  effectiveDate: date('effective_date'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+})
+
+// ─── Beneficiaries ────────────────────────────────────────────────────────────
+
+export const beneficiaries = pgTable('beneficiaries', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  employeeId: uuid('employee_id').references(() => employees.id, { onDelete: 'cascade' }).notNull(),
+  beneficiaryType: beneficiaryTypeEnum('beneficiary_type').notNull(),
+  firstName: text('first_name').notNull(),
+  lastName: text('last_name').notNull(),
+  relationship: text('relationship').notNull(),
+  dateOfBirth: date('date_of_birth'),
+  address: text('address'),
+  city: text('city'),
+  state: text('state'),
+  zip: text('zip'),
+  phone: text('phone'),
+  percentage: numeric('percentage', { precision: 5, scale: 2 }).notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+})
+
+// ─── Deductions (Salary Redirection) ─────────────────────────────────────────
+
+export const deductions = pgTable('deductions', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  employeeId: uuid('employee_id').references(() => employees.id, { onDelete: 'cascade' }).notNull().unique(),
+  // 10 coverage categories — each with pre-tax flag + per-paycheck amount
+  medicalPreTax: boolean('medical_pre_tax').default(true),
+  medicalAmount: numeric('medical_amount', { precision: 8, scale: 2 }),
+  dentalPreTax: boolean('dental_pre_tax').default(true),
+  dentalAmount: numeric('dental_amount', { precision: 8, scale: 2 }),
+  visionPreTax: boolean('vision_pre_tax').default(true),
+  visionAmount: numeric('vision_amount', { precision: 8, scale: 2 }),
+  accidentPreTax: boolean('accident_pre_tax').default(false),
+  accidentAmount: numeric('accident_amount', { precision: 8, scale: 2 }),
+  cancerPreTax: boolean('cancer_pre_tax').default(false),
+  cancerAmount: numeric('cancer_amount', { precision: 8, scale: 2 }),
+  stdPreTax: boolean('std_pre_tax').default(false),
+  stdAmount: numeric('std_amount', { precision: 8, scale: 2 }),
+  hospitalPreTax: boolean('hospital_pre_tax').default(false),
+  hospitalAmount: numeric('hospital_amount', { precision: 8, scale: 2 }),
+  termLifePreTax: boolean('term_life_pre_tax').default(false),
+  termLifeAmount: numeric('term_life_amount', { precision: 8, scale: 2 }),
+  wholeLifePreTax: boolean('whole_life_pre_tax').default(false),
+  wholeLifeAmount: numeric('whole_life_amount', { precision: 8, scale: 2 }),
+  otherPreTax: boolean('other_pre_tax').default(false),
+  otherAmount: numeric('other_amount', { precision: 8, scale: 2 }),
+  otherDescription: text('other_description'),
+  employeeSignedAt: timestamp('employee_signed_at'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+})
+
 // ─── Job Postings ─────────────────────────────────────────────────────────────
 
 export const jobPostings = pgTable('job_postings', {
@@ -283,6 +448,11 @@ export const employeesRelations = relations(employees, ({ one, many }) => ({
   complianceAlerts: many(complianceAlerts),
   incidents: many(incidents),
   riskScores: many(driverRiskScores),
+  familyMembers: many(familyMembers),
+  groupHealthEnrollment: one(groupHealthEnrollments, { fields: [employees.id], references: [groupHealthEnrollments.employeeId] }),
+  lifeInsuranceEnrollment: one(lifeInsuranceEnrollments, { fields: [employees.id], references: [lifeInsuranceEnrollments.employeeId] }),
+  beneficiaries: many(beneficiaries),
+  deductions: one(deductions, { fields: [employees.id], references: [deductions.employeeId] }),
 }))
 
 export const incidentsRelations = relations(incidents, ({ one }) => ({
